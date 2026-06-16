@@ -1,6 +1,6 @@
 # Betting Tracker
 
-Automatically fetches and records closing odds for upcoming bets using the Odds API and writes them back to a Google Sheet. Runs on a 5-minute schedule via GitHub Actions.
+Automatically fetches and records closing odds for upcoming bets using the Odds API and writes them back to a Google Sheet. Runs on a 15-minute schedule via GitHub Actions.
 
 ## What It Does
 
