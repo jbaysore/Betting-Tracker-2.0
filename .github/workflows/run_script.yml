@@ -26,4 +26,5 @@ jobs:
       - name: Run script
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
         run: python main.py
