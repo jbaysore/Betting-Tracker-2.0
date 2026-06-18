@@ -45,7 +45,7 @@ local_tz = pytz.timezone("America/Chicago")
 utc = pytz.utc
 
 utc_now = datetime.now(pytz.utc)
-window = timedelta(minutes=5)
+window = timedelta(minutes=7)
 
 # --- Odds API setup ---
 ODDS_API_KEY = os.environ["ODDS_API_KEY"]
