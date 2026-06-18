@@ -19,7 +19,7 @@ creds = Credentials.from_service_account_file(
 client = gspread.authorize(creds)
 
 # --- Open Spreadsheet ---
-SHEET_ID = "1DiH3XXyV2kpuG2arvtVX1fTOPi1Bzw5mPGtGLlyStqM"
+SHEET_ID = os.environ["SHEET_ID"]
 spreadsheet = client.open_by_key(SHEET_ID)
 
 sheet = spreadsheet.worksheet("Bets")
