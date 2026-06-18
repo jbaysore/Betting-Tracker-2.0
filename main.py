@@ -37,6 +37,7 @@ sport_col = header.index("Sport")
 team1_col = header.index("Team 1")
 team2_col = header.index("Team 2")
 selection_col = header.index("Selection")
+bet_type_col = header.index("Bet Type")
 closing_odds_col = header.index("ClosingOdds")
 book_col = header.index("Book")
 
@@ -86,12 +87,13 @@ def fuzzy_match_event(events, team1, team2):
         return best_event, best_score
     return None, best_score
 
-def fuzzy_match_selection(outcomes, selection):
+def fuzzy_match_team(outcomes, team_name):
+    """For h2h/spreads — matches outcome['name'] against a team name."""
     best_outcome = None
     best_score = 0
 
     for o in outcomes:
-        score = fuzz.ratio(o["name"], selection)
+        score = fuzz.ratio(o["name"], team_name)
         if score > best_score:
             best_score = score
             best_outcome = o
@@ -99,6 +101,33 @@ def fuzzy_match_selection(outcomes, selection):
     if best_score >= MATCH_THRESHOLD:
         return best_outcome, best_score
     return None, best_score
+
+def get_market_outcomes(markets, market_key):
+    """Pulls the outcomes list for a specific market key (h2h, spreads, totals)
+    out of a bookmaker's markets array."""
+    market = next((m for m in markets if m["key"] == market_key), None)
+    return market["outcomes"] if market else []
+
+def parse_spread_selection(selection):
+    """'Chiefs -3.5' -> ('Chiefs', -3.5). Returns (None, None) if unparseable."""
+    parts = selection.strip().rsplit(" ", 1)
+    if len(parts) != 2:
+        return None, None
+    try:
+        return parts[0].strip(), float(parts[1].strip())
+    except ValueError:
+        return None, None
+
+def parse_total_selection(selection):
+    """'Over 47.5' -> ('Over', 47.5). Returns (None, None) if unparseable."""
+    parts = selection.strip().split(" ", 1)
+    if len(parts) != 2:
+        return None, None
+    direction = parts[0].strip().capitalize()
+    try:
+        return direction, float(parts[1].strip())
+    except ValueError:
+        return None, None
 
 # --- Sheet write with retry ---
 def write_to_sheet(row_index, col_index, value, retries=3, delay=5):
@@ -139,8 +168,15 @@ for i, row in enumerate(rows[1:], start=2):
             team1 = row[team1_col].strip()
             team2 = row[team2_col].strip()
             selection = row[selection_col].strip()
+            bet_type = row[bet_type_col].strip()
             book = row[book_col].strip()
             sheet_col = closing_odds_col + 1
+
+            # Skip bet types this importer doesn't handle —
+            # same scope as the Bet Result tool (Prop/Parlay are manual-only)
+            if bet_type not in ("Moneyline", "Spread", "Total", "Draw"):
+                print(f"Skipping unsupported bet type for closing odds: '{bet_type}'")
+                continue
 
             # --- Fetch supported sports (only when needed) ---
             supported_sports = api_call_with_retry(
@@ -157,10 +193,10 @@ for i, row in enumerate(rows[1:], start=2):
                 print(f"Skipping unsupported sport: {sport_key}")
                 continue
 
-            # --- Fetch odds ---
+            # --- Fetch odds — now requests all three markets in one call ---
             events = api_call_with_retry(
                 f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds",
-                {"apiKey": ODDS_API_KEY, "regions": "us", "markets": "h2h"}
+                {"apiKey": ODDS_API_KEY, "regions": "us", "markets": "h2h,spreads,totals"}
             )
             if events is None:
                 print(f"Could not fetch odds for {sport_key}, skipping row")
@@ -196,17 +232,52 @@ for i, row in enumerate(rows[1:], start=2):
                 write_to_sheet(i, sheet_col, "BOOK NOT FOUND")
                 continue
 
-            outcomes = markets[0].get("outcomes", [])
+            # --- Select the right market and selection format based on Bet Type ---
+            matched_outcome = None
+            selection_score = 0
 
-            # --- Fuzzy match selection ---
-            matched_outcome, selection_score = fuzzy_match_selection(outcomes, selection)
+            if bet_type == "Moneyline":
+                outcomes = get_market_outcomes(markets, "h2h")
+                matched_outcome, selection_score = fuzzy_match_team(outcomes, selection)
+
+            elif bet_type == "Draw":
+                outcomes = get_market_outcomes(markets, "h2h")
+                matched_outcome, selection_score = fuzzy_match_team(outcomes, "Draw")
+
+            elif bet_type == "Spread":
+                team_name, line = parse_spread_selection(selection)
+                if team_name is None:
+                    print(f"Could not parse spread selection: '{selection}'")
+                    write_to_sheet(i, sheet_col, "SELECTION NOT FOUND")
+                    continue
+                outcomes = get_market_outcomes(markets, "spreads")
+                candidate, score = fuzzy_match_team(outcomes, team_name)
+                # Must match both team name AND the exact line — if the line moved
+                # since the bet was placed, this intentionally does not match,
+                # consistent with the Backfill Tool's behavior
+                if candidate and candidate.get("point") == line and score >= MATCH_THRESHOLD:
+                    matched_outcome, selection_score = candidate, score
+
+            elif bet_type == "Total":
+                direction, line = parse_total_selection(selection)
+                if direction is None:
+                    print(f"Could not parse total selection: '{selection}'")
+                    write_to_sheet(i, sheet_col, "SELECTION NOT FOUND")
+                    continue
+                outcomes = get_market_outcomes(markets, "totals")
+                candidate = next(
+                    (o for o in outcomes if o["name"] == direction and o.get("point") == line),
+                    None
+                )
+                if candidate:
+                    matched_outcome, selection_score = candidate, 100
 
             if not matched_outcome:
-                print(f"Selection '{selection}' not found in outcomes (best score: {selection_score})")
+                print(f"Selection '{selection}' not found in outcomes for bet type '{bet_type}' (best score: {selection_score})")
                 write_to_sheet(i, sheet_col, "SELECTION NOT FOUND")
                 continue
 
-            print(f"Matched selection '{matched_outcome['name']}' with score {selection_score}")
+            print(f"Matched selection '{matched_outcome['name']}' ({bet_type}) with score {selection_score}")
             write_to_sheet(i, sheet_col, matched_outcome["price"])
             print(f"Wrote closing odds {matched_outcome['price']} to row {i}")
 
