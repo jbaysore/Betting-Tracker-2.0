@@ -5,9 +5,11 @@ Automatically fetches and records closing odds for upcoming bets using the Odds 
 - Reads open bets from a Google Sheet ("Bets" tab)
 - Checks if any games are starting within the next 7 minutes
 - If no games are found in that window, exits without making any API calls
-- Fetches live closing odds from the [Odds API](https://the-odds-api.com) for those games, using the bookmaker specified per row
-- Uses fuzzy name matching to handle minor discrepancies between team names in the sheet and the Odds API
+- Fetches live closing odds (moneyline, spread, and total markets) from the [Odds API](https://the-odds-api.com) for those games, using the bookmaker specified per row
+- Selects the correct market and parses the selection based on the row's `Bet Type` — Moneyline and Draw bets match against the moneyline market, Spread bets match against the spread market at the exact line, and Total bets match against the total market at the exact line and direction
+- Uses fuzzy name matching to handle minor discrepancies between team names in the sheet and the Odds API (exact matching is still required for spread/total lines — see Bet Type Handling below)
 - Writes the closing odds back to the `ClosingOdds` column in the sheet, or a failure flag if something goes wrong
+- Skips rows with a `Bet Type` of `Prop`, `Parlay`, or any value outside the four supported types — these are intentionally left for manual closing odds entry
 
 ## Google Sheet Structure
 The script expects the following columns in the "Bets" tab:
@@ -19,9 +21,23 @@ The script expects the following columns in the "Bets" tab:
 | `Sport` | Odds API sport key (e.g. `americanfootball_nfl`) |
 | `Team 1` | Home team name (should match Odds API, fuzzy matched) |
 | `Team 2` | Away team name (should match Odds API, fuzzy matched) |
-| `Selection` | The team or outcome you bet on (fuzzy matched) |
+| `Selection` | The team or outcome you bet on — format depends on `Bet Type`, see below |
+| `Bet Type` | One of `Moneyline`, `Spread`, `Total`, or `Draw`. Any other value (e.g. `Prop`, `Parlay`) is skipped |
 | `Book` | Odds API bookmaker key (e.g. `draftkings`, `fanduel`) |
 | `ClosingOdds` | Populated automatically by this script |
+
+## Bet Type Handling
+
+The `Selection` column's expected format depends on `Bet Type`:
+
+| Bet Type | Selection format | Matching |
+|---|---|---|
+| `Moneyline` | Team name, e.g. `Kansas City Chiefs` | Fuzzy match (85% threshold) against the moneyline market |
+| `Draw` | Not used — matches the `Draw` outcome directly | Fuzzy match against the moneyline market's `Draw` outcome |
+| `Spread` | `Team -3.5` or `Team +7` | Fuzzy team name match, **plus an exact match on the point value**. If the line has moved since the bet was placed, no match will be found — this is intentional |
+| `Total` | `Over 47.5` or `Under 47.5` | Exact match on direction and point value |
+
+Spread and Total selections require an exact line match by design, consistent with how the companion Closing Odds Backfill Tool handles the same case. A bet logged at one line will not be matched against a different line at game time even if the team or direction is otherwise correct.
 
 ## Failure Flags
 If something goes wrong, the script writes one of the following values to the `ClosingOdds` column instead of a number:
@@ -30,10 +46,12 @@ If something goes wrong, the script writes one of the following values to the `C
 |---|---|
 | `NAME MISMATCH` | Team names in the sheet could not be matched to any event in the Odds API, even with fuzzy matching |
 | `BOOK NOT FOUND` | The bookmaker specified in the `Book` column was not available for that event |
-| `SELECTION NOT FOUND` | The selection could not be matched to any outcome for that event |
+| `SELECTION NOT FOUND` | The selection could not be matched to any outcome for that event — including spread/total selections that couldn't be parsed, or whose line no longer matches what the market is currently offering |
 
 ## Fuzzy Matching
-Team names and selections are matched using fuzzy string comparison with an 85% confidence threshold. This means minor differences in formatting, abbreviations, or spelling between your sheet and the Odds API will still match correctly. If the confidence is below 85%, the row is flagged as `NAME MISMATCH` or `SELECTION NOT FOUND`.
+Team names (for Moneyline, Draw, and the team portion of Spread selections) are matched using fuzzy string comparison with an 85% confidence threshold. This means minor differences in formatting, abbreviations, or spelling between your sheet and the Odds API will still match correctly. If the confidence is below 85%, the row is flagged as `NAME MISMATCH` or `SELECTION NOT FOUND`.
+
+Spread and Total point values are matched exactly, not fuzzily — see Bet Type Handling above.
 
 ## Setup
 
@@ -58,6 +76,7 @@ Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
+
 Add your `service_account.json` to the project root and set your API key as an environment variable:
 ```bash
 export ODDS_API_KEY=your_key_here
@@ -70,6 +89,8 @@ The workflow is triggered every 5 minutes by [cron-job.org](https://cron-job.org
 You can also trigger a manual run anytime from the **Actions** tab in GitHub by clicking **Run workflow**.
 
 > **Note:** If you fork or clone this repo, the cron-job.org job is not included. You will need to recreate it pointing at your own repo using a personal access token with Actions read/write permission.
+
+> **Note on API usage:** Each triggered run (i.e. one where a game is starting within the 7-minute window) now requests all three markets (`h2h,spreads,totals`) in a single call, which costs more Odds API credits per call than the moneyline-only version. Idle 5-minute checks where no game is in the window still make no API calls and cost nothing.
 
 ## Files
 ```
