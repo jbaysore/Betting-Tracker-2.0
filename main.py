@@ -206,8 +206,20 @@ for i, row in enumerate(rows[1:], start=2):
             matched_event, match_score = fuzzy_match_event(events, team1, team2)
 
             if not matched_event:
-                print(f"No match found for {team1} vs {team2} (best score: {match_score})")
-                write_to_sheet(i, sheet_col, "NAME MISMATCH")
+                # No event found for this team pairing in the live odds feed.
+                # This is ambiguous by design: it could mean the game was
+                # voided/postponed and dropped out of the feed, or it could be
+                # a genuine team-name formatting mismatch — this importer has
+                # no way to tell the two apart from this endpoint alone.
+                # Rather than write a misleading "NAME MISMATCH" (which isn't
+                # necessarily true and was confusing voided games with real
+                # mismatches), leave ClosingOdds blank. The Historical Odds
+                # Backfill Tool (BetsPage -> Check Closing Odds) already does
+                # the real diagnostic work on demand and reports a specific
+                # skip reason per row — that's the place to investigate this,
+                # not this unattended importer.
+                print(f"No match found for {team1} vs {team2} (best score: {match_score}) — "
+                      f"leaving ClosingOdds blank for manual review via the Backfill Tool")
                 continue
 
             print(f"Matched event with score {match_score}: {matched_event['home_team']} vs {matched_event['away_team']}")
