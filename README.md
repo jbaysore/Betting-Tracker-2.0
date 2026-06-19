@@ -44,12 +44,25 @@ If something goes wrong, the script writes one of the following values to the `C
 
 | Flag | Meaning |
 |---|---|
-| `NAME MISMATCH` | Team names in the sheet could not be matched to any event in the Odds API, even with fuzzy matching |
 | `BOOK NOT FOUND` | The bookmaker specified in the `Book` column was not available for that event |
 | `SELECTION NOT FOUND` | The selection could not be matched to any outcome for that event — including spread/total selections that couldn't be parsed, or whose line no longer matches what the market is currently offering |
 
+### No event match — `ClosingOdds` left blank, no flag written
+
+If the team names in the sheet can't be matched (even fuzzily) to any event in the Odds API's live odds feed, `ClosingOdds` is **left blank** rather than flagged. This case used to write `NAME MISMATCH`, but that flag was misleading: a missing event in this feed is genuinely ambiguous between two very different situations —
+
+1. The game was **voided or postponed** and dropped out of the live odds feed entirely (books pull lines once a game won't be played), or
+2. The team names really don't match well enough — a real formatting issue worth investigating.
+
+This script has no way to distinguish the two from the live odds feed alone, and previously labeling both cases `NAME MISMATCH` falsely implied case 2 every time, even when the game was simply voided. Writing nothing is more honest, and it has two practical benefits:
+
+- A blank `ClosingOdds` is exactly what the **Historical Odds Backfill Tool** (in the main app's Bets page) looks for — running it on demand re-attempts the match and reports a specific, current reason if it still fails, which is a better diagnostic than a stale flag written once at game time.
+- If the bet later resolves to `Result = VOID` (written by the separate Bet Result Automation Tool, hours after game time once it confirms the game was cancelled), that confirms retroactively that the blank `ClosingOdds` was correct and expected — no further action needed. If `Result` instead settles to `WIN`/`LOSS`/`PUSH`, a blank `ClosingOdds` on that row is worth investigating as a genuine name-matching issue.
+
+This script only ever evaluates a given row once, in the 7-minute window before its game starts — it does not retry blank rows on later runs. Resolving the ambiguity is the Backfill Tool's job, not this script's.
+
 ## Fuzzy Matching
-Team names (for Moneyline, Draw, and the team portion of Spread selections) are matched using fuzzy string comparison with an 85% confidence threshold. This means minor differences in formatting, abbreviations, or spelling between your sheet and the Odds API will still match correctly. If the confidence is below 85%, the row is flagged as `NAME MISMATCH` or `SELECTION NOT FOUND`.
+Team names (for Moneyline, Draw, and the team portion of Spread selections) are matched using fuzzy string comparison with an 85% confidence threshold. This means minor differences in formatting, abbreviations, or spelling between your sheet and the Odds API will still match correctly. If the confidence is below 85%, the row is left blank (no event match) or flagged `SELECTION NOT FOUND`, depending on which stage failed — see Failure Flags above.
 
 Spread and Total point values are matched exactly, not fuzzily — see Bet Type Handling above.
 
