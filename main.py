@@ -172,13 +172,10 @@ for i, row in enumerate(rows[1:], start=2):
             book = row[book_col].strip()
             sheet_col = closing_odds_col + 1
 
-            # Skip bet types this importer doesn't handle —
-            # same scope as the Bet Result tool (Prop/Parlay are manual-only)
             if bet_type not in ("Moneyline", "Spread", "Total", "Draw"):
                 print(f"Skipping unsupported bet type for closing odds: '{bet_type}'")
                 continue
 
-            # --- Fetch supported sports (only when needed) ---
             supported_sports = api_call_with_retry(
                 "https://api.the-odds-api.com/v4/sports",
                 {"apiKey": ODDS_API_KEY}
@@ -193,38 +190,32 @@ for i, row in enumerate(rows[1:], start=2):
                 print(f"Skipping unsupported sport: {sport_key}")
                 continue
 
-            # --- Fetch odds — now requests all three markets in one call ---
+            # NOTE 2026-06-20: oddsFormat=american is REQUIRED here. The Odds
+            # API defaults to DECIMAL odds when this parameter is omitted
+            # (confirmed directly from their V4 docs and error-code
+            # reference), and every other odds-fetching call in this project
+            # (backfillClosingOdds.js, odds_api.py) already sets this
+            # explicitly. This call was the one place that didn't, which is
+            # why ClosingOdds started showing decimal-shaped values like
+            # 1.13/1.45/1.4/3.15 instead of American odds like -200/118/-453
+            # for every other column in the same sheet.
             events = api_call_with_retry(
                 f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds",
-                {"apiKey": ODDS_API_KEY, "regions": "us", "markets": "h2h,spreads,totals"}
+                {"apiKey": ODDS_API_KEY, "regions": "us", "markets": "h2h,spreads,totals", "oddsFormat": "american"}
             )
             if events is None:
                 print(f"Could not fetch odds for {sport_key}, skipping row")
                 continue
 
-            # --- Fuzzy match event ---
             matched_event, match_score = fuzzy_match_event(events, team1, team2)
 
             if not matched_event:
-                # No event found for this team pairing in the live odds feed.
-                # This is ambiguous by design: it could mean the game was
-                # voided/postponed and dropped out of the feed, or it could be
-                # a genuine team-name formatting mismatch — this importer has
-                # no way to tell the two apart from this endpoint alone.
-                # Rather than write a misleading "NAME MISMATCH" (which isn't
-                # necessarily true and was confusing voided games with real
-                # mismatches), leave ClosingOdds blank. The Historical Odds
-                # Backfill Tool (BetsPage -> Check Closing Odds) already does
-                # the real diagnostic work on demand and reports a specific
-                # skip reason per row — that's the place to investigate this,
-                # not this unattended importer.
                 print(f"No match found for {team1} vs {team2} (best score: {match_score}) — "
                       f"leaving ClosingOdds blank for manual review via the Backfill Tool")
                 continue
 
             print(f"Matched event with score {match_score}: {matched_event['home_team']} vs {matched_event['away_team']}")
 
-            # --- Find specified bookmaker ---
             bookmakers = matched_event.get("bookmakers", [])
             if not bookmakers:
                 print("No bookmakers available for this event")
@@ -244,7 +235,6 @@ for i, row in enumerate(rows[1:], start=2):
                 write_to_sheet(i, sheet_col, "BOOK NOT FOUND")
                 continue
 
-            # --- Select the right market and selection format based on Bet Type ---
             matched_outcome = None
             selection_score = 0
 
@@ -264,9 +254,6 @@ for i, row in enumerate(rows[1:], start=2):
                     continue
                 outcomes = get_market_outcomes(markets, "spreads")
                 candidate, score = fuzzy_match_team(outcomes, team_name)
-                # Must match both team name AND the exact line — if the line moved
-                # since the bet was placed, this intentionally does not match,
-                # consistent with the Backfill Tool's behavior
                 if candidate and candidate.get("point") == line and score >= MATCH_THRESHOLD:
                     matched_outcome, selection_score = candidate, score
 
