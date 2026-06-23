@@ -51,6 +51,25 @@ window = timedelta(minutes=7)
 # --- Odds API setup ---
 ODDS_API_KEY = os.environ["ODDS_API_KEY"]
 
+# --- Book region routing ---
+# Mirrors bookConstants.js's regionForBookKey in odds-tool. The Odds API splits
+# bookmakers across regions, and requesting the wrong region for a given book
+# means that book is simply absent from the response — this previously caused
+# main.py to wrongly write "BOOK NOT FOUND" for every bet on these books.
+EXCHANGE_KEYS = {"polymarket", "kalshi", "novig", "betopenly", "prophetx"}
+US2_KEYS = {
+    "ballybet", "betanysports", "betparx", "espnbet", "fliff",
+    "hardrockbet", "hardrockbet_az", "hardrockbet_fl",
+    "hardrockbet_oh", "rebet",
+}
+
+def region_for_book_key(book_key):
+    if book_key in EXCHANGE_KEYS:
+        return "us_ex"
+    if book_key in US2_KEYS:
+        return "us2"
+    return "us"
+
 # --- Retry helper ---
 def api_call_with_retry(url, params, retries=3, delay=5):
     for attempt in range(retries):
@@ -201,7 +220,7 @@ for i, row in enumerate(rows[1:], start=2):
             # for every other column in the same sheet.
             events = api_call_with_retry(
                 f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds",
-                {"apiKey": ODDS_API_KEY, "regions": "us", "markets": "h2h,spreads,totals", "oddsFormat": "american"}
+                {"apiKey": ODDS_API_KEY, "regions": region_for_book_key(book), "markets": "h2h,spreads,totals", "oddsFormat": "american"}
             )
             if events is None:
                 print(f"Could not fetch odds for {sport_key}, skipping row")
