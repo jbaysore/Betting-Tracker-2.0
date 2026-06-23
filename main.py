@@ -89,10 +89,33 @@ def to_decimal_odds(american_odds):
         return 1 + american_odds / 100
     return 1 + 100 / abs(american_odds)
 
+def closing_odds_to_decimal(raw):
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s or s.upper() == "VOID":
+        return None
+    try:
+        n = float(s.replace("+", ""))
+    except ValueError:
+        return None
+    if n < 0:
+        return to_decimal_odds(n)
+    if n >= 100:
+        return to_decimal_odds(n)
+    if 1.01 <= n < 100:
+        return round(n, 8)
+    return to_decimal_odds(n)
+
 def calc_clv(decimal_odds_taken, decimal_closing_odds):
     if not decimal_odds_taken or not decimal_closing_odds:
         return None
     return round((decimal_odds_taken / decimal_closing_odds - 1) * 100, 2)
+
+def clv_for_sheet(clv_percent):
+    if clv_percent is None:
+        return None
+    return round(clv_percent / 100, 6)
 
 # --- Retry helper ---
 def api_call_with_retry(url, params, retries=3, delay=5):
@@ -324,7 +347,7 @@ for i, row in enumerate(rows[1:], start=2):
             write_to_sheet(i, sheet_col, closing_price)
             print(f"Wrote closing odds {closing_price} to row {i}")
 
-            decimal_closing = to_decimal_odds(closing_price)
+            decimal_closing = closing_odds_to_decimal(closing_price)
             if decimal_closing is not None:
                 write_to_sheet(i, decimal_closing_odds_col + 1, decimal_closing)
 
@@ -332,7 +355,9 @@ for i, row in enumerate(rows[1:], start=2):
                 decimal_taken = to_decimal_odds(odds_taken_raw) if odds_taken_raw else None
                 clv = calc_clv(decimal_taken, decimal_closing)
                 if clv is not None:
-                    write_to_sheet(i, clv_col + 1, clv)
+                    sheet_clv = clv_for_sheet(clv)
+                    if sheet_clv is not None:
+                        write_to_sheet(i, clv_col + 1, sheet_clv)
 
     except Exception as e:
         print("Error parsing:", combined, "|", e)
