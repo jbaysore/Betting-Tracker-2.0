@@ -40,6 +40,9 @@ selection_col = header.index("Selection")
 bet_type_col = header.index("Bet Type")
 closing_odds_col = header.index("ClosingOdds")
 book_col = header.index("Book")
+decimal_closing_odds_col = header.index("DecimalClosingOdds")
+clv_col = header.index("CLV")
+odds_taken_col = header.index("OddsTaken")
 
 # --- Timezone setup ---
 local_tz = pytz.timezone("America/Chicago")
@@ -69,6 +72,27 @@ def region_for_book_key(book_key):
     if book_key in US2_KEYS:
         return "us2"
     return "us"
+
+# --- Decimal odds / CLV ---
+# DecimalClosingOdds and CLV used to be a dragged-down Sheets formula, which
+# silently stopped calculating on new rows whenever dragging it down was
+# forgotten. Computing both here means every row this script resolves gets
+# them for free, with no manual sheet upkeep required.
+def to_decimal_odds(american_odds):
+    if american_odds is None:
+        return None
+    try:
+        american_odds = float(american_odds)
+    except (TypeError, ValueError):
+        return None
+    if american_odds > 0:
+        return 1 + american_odds / 100
+    return 1 + 100 / abs(american_odds)
+
+def calc_clv(decimal_odds_taken, decimal_closing_odds):
+    if not decimal_odds_taken or not decimal_closing_odds:
+        return None
+    return round((decimal_odds_taken / decimal_closing_odds - 1) * 100, 2)
 
 # --- Retry helper ---
 def api_call_with_retry(url, params, retries=3, delay=5):
@@ -296,8 +320,19 @@ for i, row in enumerate(rows[1:], start=2):
                 continue
 
             print(f"Matched selection '{matched_outcome['name']}' ({bet_type}) with score {selection_score}")
-            write_to_sheet(i, sheet_col, matched_outcome["price"])
-            print(f"Wrote closing odds {matched_outcome['price']} to row {i}")
+            closing_price = matched_outcome["price"]
+            write_to_sheet(i, sheet_col, closing_price)
+            print(f"Wrote closing odds {closing_price} to row {i}")
+
+            decimal_closing = to_decimal_odds(closing_price)
+            if decimal_closing is not None:
+                write_to_sheet(i, decimal_closing_odds_col + 1, decimal_closing)
+
+                odds_taken_raw = row[odds_taken_col].strip() if len(row) > odds_taken_col else ""
+                decimal_taken = to_decimal_odds(odds_taken_raw) if odds_taken_raw else None
+                clv = calc_clv(decimal_taken, decimal_closing)
+                if clv is not None:
+                    write_to_sheet(i, clv_col + 1, clv)
 
     except Exception as e:
         print("Error parsing:", combined, "|", e)
