@@ -5,7 +5,7 @@ Automatically fetches and records closing odds for upcoming bets using the Odds 
 - Reads open bets from a Google Sheet ("Bets" tab)
 - Checks if any games are starting within the next 7 minutes
 - If no games are found in that window, exits without making any API calls
-- Fetches live closing odds (moneyline, spread, and total markets) from the [Odds API](https://the-odds-api.com) for those games, using the bookmaker specified per row
+- Fetches live closing odds (moneyline, spread, and total markets) from the [Odds API](https://the-odds-api.com) for those games, using the bookmaker specified per row, requesting the Odds API region that bookmaker belongs to (see Book Regions below)
 - Selects the correct market and parses the selection based on the row's `Bet Type` — Moneyline and Draw bets match against the moneyline market, Spread bets match against the spread market at the exact line, and Total bets match against the total market at the exact line and direction
 - Uses fuzzy name matching to handle minor discrepancies between team names in the sheet and the Odds API (exact matching is still required for spread/total lines — see Bet Type Handling below)
 - Writes the closing odds back to the `ClosingOdds` column in the sheet, or a failure flag if something goes wrong
@@ -60,6 +60,17 @@ This script has no way to distinguish the two from the live odds feed alone, and
 - If the bet later resolves to `Result = VOID` (written by the separate Bet Result Automation Tool, hours after game time once it confirms the game was cancelled), that confirms retroactively that the blank `ClosingOdds` was correct and expected — no further action needed. If `Result` instead settles to `WIN`/`LOSS`/`PUSH`, a blank `ClosingOdds` on that row is worth investigating as a genuine name-matching issue.
 
 This script only ever evaluates a given row once, in the 7-minute window before its game starts — it does not retry blank rows on later runs. Resolving the ambiguity is the Backfill Tool's job, not this script's.
+
+## Book Regions
+The Odds API splits bookmakers across regions, and a book only appears in the response for its own region. The script looks up each row's `Book` key against three groups before requesting odds:
+
+| Region | Books |
+|---|---|
+| `us_ex` | `polymarket`, `kalshi`, `novig`, `betopenly`, `prophetx` |
+| `us2` | `ballybet`, `betanysports`, `betparx`, `espnbet`, `fliff`, `hardrockbet`, `hardrockbet_az`, `hardrockbet_fl`, `hardrockbet_oh`, `rebet` |
+| `us` | everything else |
+
+This list is kept in sync with `bookConstants.js` in the companion odds-tool app — if a book is added there, add it here too, or this script will wrongly write `BOOK NOT FOUND` for bets on that book.
 
 ## Fuzzy Matching
 Team names (for Moneyline, Draw, and the team portion of Spread selections) are matched using fuzzy string comparison with an 85% confidence threshold. This means minor differences in formatting, abbreviations, or spelling between your sheet and the Odds API will still match correctly. If the confidence is below 85%, the row is left blank (no event match) or flagged `SELECTION NOT FOUND`, depending on which stage failed — see Failure Flags above.
