@@ -9,6 +9,7 @@ Automatically fetches and records closing odds for upcoming bets using the Odds 
 - Selects the correct market and parses the selection based on the row's `Bet Type` — Moneyline and Draw bets match against the moneyline market, Spread bets match against the spread market at the exact line, and Total bets match against the total market at the exact line and direction
 - Uses fuzzy name matching to handle minor discrepancies between team names in the sheet and the Odds API (exact matching is still required for spread/total lines — see Bet Type Handling below)
 - Writes the closing odds back to the `ClosingOdds` column in the sheet, or a failure flag if something goes wrong
+- **Also writes `DecimalClosingOdds` and `CLV` on the same row** whenever a numeric closing line is found — computed from `ClosingOdds` + `OddsTaken`, with CLV stored as a fraction for the sheet's percent-formatted `CLV` column (e.g. `0.5412` displays as `54.12%`). No sheet formulas or manual upkeep required.
 - Skips rows with a `Bet Type` of `Prop`, `Parlay`, or any value outside the four supported types — these are intentionally left for manual closing odds entry
 
 ## Google Sheet Structure
@@ -25,6 +26,8 @@ The script expects the following columns in the "Bets" tab:
 | `Bet Type` | One of `Moneyline`, `Spread`, `Total`, or `Draw`. Any other value (e.g. `Prop`, `Parlay`) is skipped |
 | `Book` | Odds API bookmaker key (e.g. `draftkings`, `fanduel`) |
 | `ClosingOdds` | Populated automatically by this script |
+| `DecimalClosingOdds` | Populated automatically alongside `ClosingOdds` |
+| `CLV` | Populated automatically alongside `ClosingOdds` |
 
 ## Bet Type Handling
 
